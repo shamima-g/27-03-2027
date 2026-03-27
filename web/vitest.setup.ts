@@ -1,6 +1,13 @@
 // Learn more: https://github.com/testing-library/jest-dom
 import '@testing-library/jest-dom/vitest';
 
+// MSW — start the mock server before all tests, reset handlers after each test
+import { server } from '@/mocks/server';
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'warn' }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
 // Accessibility testing with axe-core
 import * as matchers from 'vitest-axe/matchers';
 import { expect } from 'vitest';

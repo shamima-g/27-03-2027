@@ -1,20 +1,21 @@
 /**
  * Integration Test: Page Rendering
  *
- * This template demonstrates integration testing for Next.js pages
+ * Demonstrates integration testing for Next.js page components
  * with data fetching, user interactions, and state management.
  *
- * Best practices:
- * - Test complete user workflows (load page -> interact -> verify result)
- * - Mock API calls but test real component interactions
- * - Verify accessibility and user experience
- * - Test loading states, error states, and success states
+ * Uses MSW for request interception — no manual fetch mocking.
  */
 
-import { vi, type Mock } from 'vitest';
+import { http, HttpResponse } from 'msw';
+import { server } from '@/mocks/server';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
+import { API_BASE_URL } from '@/lib/utils/constants';
+
+// Match the runtime base URL the fetch call uses
+const DATA_URL = `${API_BASE_URL}/data`;
 
 // Example: A page component that fetches and displays data
 function ExampleDataPage() {
@@ -26,7 +27,7 @@ function ExampleDataPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/data');
+      const response = await fetch(`${API_BASE_URL}/data`);
       if (!response.ok) throw new Error('Failed to fetch');
       const result = await response.json();
       setData(result);
@@ -49,99 +50,76 @@ function ExampleDataPage() {
   );
 }
 
-// Mock fetch globally
-global.fetch = vi.fn();
-
 describe('Page Rendering Integration Tests', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   describe('Data fetching workflow', () => {
     it('should load and display data when button is clicked', async () => {
-      // Arrange
       const user = userEvent.setup();
-      const mockData = { name: 'Test Data' };
-      (global.fetch as Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockData,
-      });
+      server.use(
+        http.get(DATA_URL, () => HttpResponse.json({ name: 'Test Data' })),
+      );
 
       render(<ExampleDataPage />);
 
-      // Act
-      const loadButton = screen.getByRole('button', { name: /load data/i });
-      await user.click(loadButton);
+      await user.click(screen.getByRole('button', { name: /load data/i }));
 
-      // Assert - wait for data to load
       await waitFor(() => {
         expect(screen.getByText('Name: Test Data')).toBeInTheDocument();
       });
-
-      // Verify fetch was called
-      expect(global.fetch).toHaveBeenCalledWith('/api/data');
     });
 
     it('should display error message when fetch fails', async () => {
-      // Arrange
       const user = userEvent.setup();
-      (global.fetch as Mock).mockResolvedValueOnce({
-        ok: false,
-      });
+      server.use(
+        http.get(DATA_URL, () => new HttpResponse(null, { status: 500 })),
+      );
 
       render(<ExampleDataPage />);
 
-      // Act
-      const loadButton = screen.getByRole('button', { name: /load data/i });
-      await user.click(loadButton);
+      await user.click(screen.getByRole('button', { name: /load data/i }));
 
-      // Assert
       await waitFor(() => {
         expect(screen.getByRole('alert')).toHaveTextContent('Failed to fetch');
       });
     });
 
     it('should handle network errors', async () => {
-      // Arrange
       const user = userEvent.setup();
-      (global.fetch as Mock).mockRejectedValueOnce(new Error('Network error'));
+      // HttpResponse.error() simulates a network-level failure (connection refused / fetch TypeError)
+      server.use(http.get(DATA_URL, () => HttpResponse.error()));
 
       render(<ExampleDataPage />);
 
-      // Act
       await user.click(screen.getByRole('button', { name: /load data/i }));
 
-      // Assert
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toHaveTextContent('Network error');
+        expect(screen.getByRole('alert')).toBeInTheDocument();
       });
     });
   });
 
   describe('Accessibility', () => {
     it('should have accessible heading', () => {
-      // Arrange & Act
       render(<ExampleDataPage />);
 
-      // Assert
       expect(
         screen.getByRole('heading', { name: /data page/i }),
       ).toBeInTheDocument();
     });
 
     it('should disable button during loading', async () => {
-      // Arrange
       const user = userEvent.setup();
-      (global.fetch as Mock).mockImplementationOnce(
-        () => new Promise((resolve) => setTimeout(resolve, 100)),
+      // Delay response to observe loading state
+      server.use(
+        http.get(DATA_URL, async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return HttpResponse.json({ name: 'Slow Data' });
+        }),
       );
 
       render(<ExampleDataPage />);
 
-      // Act
       await user.click(screen.getByRole('button', { name: /load data/i }));
 
-      // Assert
       expect(screen.getByRole('button', { name: /loading/i })).toBeDisabled();
     });
   });
